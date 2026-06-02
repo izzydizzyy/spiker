@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Message Leaderboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --deep:    #020b18;
+    --mid:     #041e36;
+    --surface: #062d52;
+    --blue1:   #0077cc;
+    --blue2:   #00b4d8;
+    --cyan:    #90e0ef;
+    --foam:    #caf0f8;
+    --gold:    #ffd700;
+    --silver:  #c0c0c0;
+    --bronze:  #cd7f32;
+    --glow:    rgba(0, 180, 216, 0.55);
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--deep);
+    color: var(--foam);
+    font-family: 'Exo 2', sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* ── Ocean background ───────────────────────────────── */
+  .ocean-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+  }
+
+  .ocean-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 120% 60% at 50% 100%, #062d52 0%, transparent 70%),
+      radial-gradient(ellipse 80% 40% at 20% 80%, #003566 0%, transparent 60%),
+      radial-gradient(ellipse 60% 30% at 80% 70%, #0077b6 0%, transparent 50%),
+      linear-gradient(180deg, #020b18 0%, #031526 40%, #041e36 70%, #062d52 100%);
+  }
+
+  /* Animated light rays */
+  .ray {
+    position: absolute;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to top, rgba(0,180,216,0.12), transparent);
+    transform-origin: bottom center;
+    animation: sway linear infinite;
+  }
+  .ray:nth-child(1)  { left: 10%; height: 70vh; animation-duration: 8s;  animation-delay: 0s;   opacity: .6; width: 80px;  }
+  .ray:nth-child(2)  { left: 25%; height: 55vh; animation-duration: 11s; animation-delay: -3s;  opacity: .4; width: 50px;  }
+  .ray:nth-child(3)  { left: 40%; height: 80vh; animation-duration: 9s;  animation-delay: -1s;  opacity: .5; width: 100px; }
+  .ray:nth-child(4)  { left: 60%; height: 65vh; animation-duration: 13s; animation-delay: -5s;  opacity: .4; width: 60px;  }
+  .ray:nth-child(5)  { left: 75%; height: 75vh; animation-duration: 7s;  animation-delay: -2s;  opacity: .6; width: 90px;  }
+  .ray:nth-child(6)  { left: 88%; height: 50vh; animation-duration: 10s; animation-delay: -4s;  opacity: .3; width: 40px;  }
+
+  @keyframes sway {
+    0%, 100% { transform: skewX(-4deg) scaleX(1);   }
+    50%       { transform: skewX(4deg)  scaleX(1.3); }
+  }
+
+  /* Floating particles */
+  .particles {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .particle {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--cyan);
+    opacity: 0;
+    animation: float-up linear infinite;
+  }
+  @keyframes float-up {
+    0%   { transform: translateY(0) scale(1);   opacity: 0; }
+    10%  { opacity: .5; }
+    90%  { opacity: .2; }
+    100% { transform: translateY(-90vh) scale(0.3); opacity: 0; }
+  }
+
+  /* Surface shimmer */
+  .shimmer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg,
+      transparent 0%, var(--blue2) 20%,
+      var(--cyan) 50%,  var(--blue2) 80%, transparent 100%);
+    opacity: .6;
+    animation: shimmer-move 4s ease-in-out infinite;
+  }
+  @keyframes shimmer-move {
+    0%, 100% { transform: scaleX(1) translateX(0); }
+    50%       { transform: scaleX(1.1) translateX(-5%); }
+  }
+
+  /* ── Layout ─────────────────────────────────────────── */
+  .container {
+    position: relative;
+    z-index: 10;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 40px 20px 60px;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .header {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+
+  .header-eyebrow {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    color: var(--blue2);
+    margin-bottom: 8px;
+    opacity: .8;
+  }
+
+  .header-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: clamp(36px, 6vw, 56px);
+    font-weight: 700;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--foam) 0%, var(--cyan) 50%, var(--blue2) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: none;
+    margin-bottom: 8px;
+    position: relative;
+  }
+
+  .header-title::after {
+    content: '';
+    display: block;
+    width: 80px;
+    height: 3px;
+    margin: 12px auto 0;
+    background: linear-gradient(90deg, var(--blue1), var(--cyan), var(--blue1));
+    border-radius: 2px;
+    animation: pulse-line 2s ease-in-out infinite;
+  }
+  @keyframes pulse-line {
+    0%, 100% { opacity: 1; width: 80px; }
+    50%       { opacity: .5; width: 120px; }
+  }
+
+  .header-sub {
+    font-size: 13px;
+    color: var(--cyan);
+    opacity: .7;
+    margin-top: 10px;
+    letter-spacing: 1px;
+  }
+
+  /* ── Status pill ────────────────────────────────────── */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan);
+    animation: blink 1.5s ease-in-out infinite;
+  }
+  .status-dot.offline { background: #ff4444; box-shadow: 0 0 8px #ff4444; animation: none; }
+  @keyframes blink { 0%,100%{opacity:1}50%{opacity:.3} }
+
+  .status-text {
+    font-size: 12px;
+    font-family: 'Rajdhani', sans-serif;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--cyan);
+    opacity: .8;
+  }
+
+  .reset-info {
+    font-size: 12px;
+    color: var(--foam);
+    opacity: .45;
+    margin-left: 16px;
+    border-left: 1px solid rgba(144,224,239,.2);
+    padding-left: 16px;
+  }
+
+  /* ── Board card ─────────────────────────────────────── */
+  .board {
+    background: rgba(4, 30, 54, 0.7);
+    border: 1px solid rgba(0, 180, 216, 0.2);
+    border-radius: 16px;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+    box-shadow:
+      0 0 0 1px rgba(0,180,216,.05),
+      0 8px 40px rgba(0,0,0,.6),
+      inset 0 1px 0 rgba(144,224,239,.08);
+  }
+
+  .board-header {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    padding: 14px 24px;
+    border-bottom: 1px solid rgba(0, 180, 216, 0.12);
+    background: rgba(0,119,204,.08);
+  }
+
+  .board-header span {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--blue2);
+    opacity: .6;
+  }
+  .board-header span:last-child { text-align: right; }
+
+  /* ── Row ────────────────────────────────────────────── */
+  .row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    padding: 0 24px;
+    height: 64px;
+    border-bottom: 1px solid rgba(0, 180, 216, 0.06);
+    transition: background .2s;
+    position: relative;
+    overflow: hidden;
+    animation: row-in .4s ease both;
+  }
+
+  @keyframes row-in {
+    from { opacity: 0; transform: translateX(-12px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .row:last-child { border-bottom: none; }
+  .row:hover { background: rgba(0, 180, 216, 0.05); }
+
+  /* Top 3 glow strips */
+  .row.rank-1::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--gold); box-shadow: 0 0 12px var(--gold); }
+  .row.rank-2::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--silver); box-shadow: 0 0 12px var(--silver); }
+  .row.rank-3::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--bronze); box-shadow: 0 0 12px var(--bronze); }
+
+  .rank-badge {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    text-align: center;
+    color: rgba(144, 224, 239, .35);
+  }
+  .rank-badge.top1 { color: var(--gold);   text-shadow: 0 0 10px var(--gold); }
+  .rank-badge.top2 { color: var(--silver); text-shadow: 0 0 10px var(--silver); }
+  .rank-badge.top3 { color: var(--bronze); text-shadow: 0 0 10px var(--bronze); }
+
+  .user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--blue1), var(--blue2));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--foam);
+    flex-shrink: 0;
+    border: 1px solid rgba(144,224,239,.2);
+  }
+
+  .username {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--foam);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row.rank-1 .username { color: #fff; }
+
+  .msg-count {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--cyan);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* ── Progress bar on rank 1 row ─────────────────────── */
+  .row.rank-1 .progress-bg {
+    display: block;
+  }
+  .progress-bg {
+    display: none;
+    position: absolute;
+    bottom: 0; left: 0; right: 0; height: 2px;
+    background: rgba(255,215,0,.15);
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold), var(--cyan));
+    animation: progress-pulse 3s ease-in-out infinite;
+  }
+  @keyframes progress-pulse {
+    0%,100% { opacity: 1; } 50% { opacity: .4; }
+  }
+
+  /* ── Empty state ────────────────────────────────────── */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--cyan);
+    opacity: .4;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+  }
+
+  /* ── Footer ─────────────────────────────────────────── */
+  .footer {
+    text-align: center;
+    margin-top: 28px;
+    font-size: 11px;
+    color: var(--cyan);
+    opacity: .3;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div class="ocean-bg">
+  <div class="ray"></div>
+  <div class="ray"></div>
+  <div class="ray"></div>
+  <div class="ray"></div>
+  <div class="ray"></div>
+  <div class="ray"></div>
+  <div class="particles" id="particles"></div>
+  <div class="shimmer"></div>
+</div>
+
+<div class="container">
+  <div class="header">
+    <div class="header-eyebrow">Weekly Rankings</div>
+    <h1 class="header-title">Message Leaderboard</h1>
+    <div class="header-sub">Most active members this week</div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-text" id="statusText">Connecting...</span>
+    <span class="reset-info">Resets every Tuesday · 7:30 AM ET</span>
+  </div>
+
+  <div class="board">
+    <div class="board-header">
+      <span>Rank</span>
+      <span>User</span>
+      <span>Messages</span>
+    </div>
+    <div id="board-body">
+      <div class="empty">Loading...</div>
+    </div>
+  </div>
+
+  <div class="footer">Live · Updates automatically</div>
+</div>
+
+<script>
+  // ── Particles ──────────────────────────────────────────
+  (function() {
+    const container = document.getElementById('particles');
+    for (let i = 0; i < 30; i++) {
+      const p = document.createElement('div');
+      p.className = 'particle';
+      const size = Math.random() * 4 + 1;
+      p.style.cssText = `
+        width:${size}px; height:${size}px;
+        left:${Math.random()*100}%;
+        bottom:${Math.random()*20}%;
+        animation-duration:${Math.random()*15+8}s;
+        animation-delay:-${Math.random()*15}s;
+      `;
+      container.appendChild(p);
+    }
+  })();
+
+  // ── WebSocket ──────────────────────────────────────────
+  const WS_URL = `ws://${location.hostname}:8081`;
+  const dot  = document.getElementById('statusDot');
+  const txt  = document.getElementById('statusText');
+  const body = document.getElementById('board-body');
+  let retryDelay = 2000;
+
+  function connect() {
+    const ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      dot.className = 'status-dot';
+      txt.textContent = 'Live';
+      retryDelay = 2000;
+    };
+
+    ws.onmessage = ({ data }) => {
+      try {
+        const rows = JSON.parse(data);
+        render(rows);
+      } catch(e) { console.error(e); }
+    };
+
+    ws.onclose = ws.onerror = () => {
+      dot.className = 'status-dot offline';
+      txt.textContent = 'Reconnecting...';
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 1.5, 30000);
+    };
+  }
+
+  function rankClass(r) {
+    if (r === 1) return 'rank-1';
+    if (r === 2) return 'rank-2';
+    if (r === 3) return 'rank-3';
+    return '';
+  }
+
+  function badgeClass(r) {
+    if (r === 1) return 'top1';
+    if (r === 2) return 'top2';
+    if (r === 3) return 'top3';
+    return '';
+  }
+
+  function badgeLabel(r) {
+    if (r === 1) return '🥇';
+    if (r === 2) return '🥈';
+    if (r === 3) return '🥉';
+    return `#${r}`;
+  }
+
+  function initials(name) {
+    return name.replace(/_\d+$/, '').slice(0, 2).toUpperCase();
+  }
+
+  function render(rows) {
+    if (!rows.length) {
+      body.innerHTML = '<div class="empty">No messages tracked yet.</div>';
+      return;
+    }
+    body.innerHTML = rows.map((r, i) => {
+      const delay = i * 40;
+      const pct   = rows[0].msgs > 0 ? (r.msgs / rows[0].msgs * 100).toFixed(1) : 0;
+      return `
+        <div class="row ${rankClass(r.rank)}" style="animation-delay:${delay}ms">
+          <div class="rank-badge ${badgeClass(r.rank)}">${badgeLabel(r.rank)}</div>
+          <div class="user-info">
+            <div class="avatar">${initials(r.username)}</div>
+            <span class="username">${escHtml(r.username)}</span>
+          </div>
+          <div class="msg-count">${r.msgs.toLocaleString()}</div>
+          <div class="progress-bg"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>`;
+    }).join('');
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  connect();
+</script>
+</body>
+</html>

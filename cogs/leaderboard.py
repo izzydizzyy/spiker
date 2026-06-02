@@ -7,21 +7,19 @@ import asyncio
 import json
 import logging
 import io
+from PIL import Image, ImageDraw, ImageFont
 
 from utils.database import get_leaderboard, get_user_rank, reset_weekly
 
 log = logging.getLogger("leaderboard")
 
-# Tuesday = weekday 1, at 7:30 AM ET
-RESET_DAY = 1   # Tuesday
+RESET_DAY = 1
 RESET_TIME = time(hour=7, minute=30)
 TIMEZONE = pytz.timezone("US/Eastern")
 
-# Shared set of active WebSocket connections (populated by web/server.py)
 ws_clients: set = set()
 
 async def broadcast_leaderboard():
-    """Push fresh leaderboard data to all connected web clients."""
     if not ws_clients:
         return
     rows = await get_leaderboard(limit=25)
@@ -38,111 +36,141 @@ async def broadcast_leaderboard():
     ws_clients -= dead
 
 
-async def screenshot_leaderboard(rows) -> bytes:
-    """Render the leaderboard as HTML and screenshot it with Playwright."""
-    from playwright.async_api import async_playwright
+def render_leaderboard_image(rows) -> bytes:
+    # Colors
+    BG_TOP       = (2, 11, 24)
+    BG_BOT       = (6, 45, 82)
+    CARD_BG      = (4, 30, 54, 210)
+    BORDER       = (0, 180, 216, 50)
+    HEADER_BG    = (0, 119, 204, 20)
+    ROW_BORDER   = (0, 180, 216, 15)
+    COLOR_FOAM   = (202, 240, 248)
+    COLOR_CYAN   = (144, 224, 239)
+    COLOR_BLUE2  = (0, 180, 216)
+    COLOR_GOLD   = (255, 215, 0)
+    COLOR_SILVER = (192, 192, 192)
+    COLOR_BRONZE = (205, 127, 50)
+    COLOR_DIM    = (100, 160, 190)
 
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    rows_html = ""
+    W = 760
+    ROW_H = 64
+    HEADER_H = 48
+    TOP_PAD = 80
+    BOTTOM_PAD = 48
+    BOARD_PAD = 32
+
+    n = min(len(rows), 10)
+    BOARD_H = HEADER_H + ROW_H * n
+    H = TOP_PAD + 110 + BOARD_H + BOTTOM_PAD
+
+    # Background gradient
+    img = Image.new("RGB", (W, H))
+    draw = ImageDraw.Draw(img)
+    for y in range(H):
+        t = y / H
+        r = int(BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t)
+        g = int(BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t)
+        b = int(BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t)
+        draw.line([(0, y), (W, y)], fill=(r, g, b))
+
+    # Fonts — fallback to default if not found
+    try:
+        font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
+        font_med   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+        font_rank  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 17)
+    except:
+        font_big = font_med = font_small = font_rank = ImageFont.load_default()
+
+    # Header text
+    eyebrow = "WEEKLY RANKINGS"
+    ew = draw.textlength(eyebrow, font=font_small)
+    draw.text(((W - ew) / 2, 28), eyebrow, font=font_small, fill=COLOR_BLUE2)
+
+    title = "Message Leaderboard"
+    tw = draw.textlength(title, font=font_big)
+    draw.text(((W - tw) / 2, 48), title, font=font_big, fill=COLOR_FOAM)
+
+    sub = "Most active members this week"
+    sw = draw.textlength(sub, font=font_small)
+    draw.text(((W - sw) / 2, 92), sub, font=font_small, fill=COLOR_CYAN)
+
+    # Board card
+    board_x = BOARD_PAD
+    board_y = TOP_PAD + 110
+    board_w = W - BOARD_PAD * 2
+
+    # Card background
+    card = Image.new("RGBA", (board_w, BOARD_H), CARD_BG)
+    img.paste(Image.new("RGB", (board_w, BOARD_H), (4, 30, 54)), (board_x, board_y),
+              Image.new("L", (board_w, BOARD_H), 210))
+
+    draw = ImageDraw.Draw(img)
+
+    # Card border
+    draw.rectangle([board_x, board_y, board_x + board_w, board_y + BOARD_H],
+                   outline=(0, 180, 216, 50), width=1)
+
+    # Column header
+    draw.rectangle([board_x, board_y, board_x + board_w, board_y + HEADER_H],
+                   fill=(0, 30, 60))
+    draw.text((board_x + 20, board_y + 16), "RANK", font=font_small, fill=COLOR_DIM)
+    draw.text((board_x + 80, board_y + 16), "USER", font=font_small, fill=COLOR_DIM)
+    msg_label = "MESSAGES"
+    mlw = draw.textlength(msg_label, font=font_small)
+    draw.text((board_x + board_w - 24 - mlw, board_y + 16), msg_label, font=font_small, fill=COLOR_DIM)
+
+    # Rows
+    medal_colors = {1: COLOR_GOLD, 2: COLOR_SILVER, 3: COLOR_BRONZE}
+    medal_labels = {1: "#1", 2: "#2", 3: "#3"}
+
     for i, row in enumerate(rows[:10]):
         rank = i + 1
-        medal = medals.get(rank, f"#{rank}")
-        rank_class = f"rank-{rank}" if rank <= 3 else ""
-        badge_class = f"top{rank}" if rank <= 3 else ""
+        ry = board_y + HEADER_H + i * ROW_H
+
+        # Row border bottom
+        draw.line([(board_x, ry + ROW_H), (board_x + board_w, ry + ROW_H)],
+                  fill=(0, 180, 216, 15))
+
+        # Left color strip for top 3
+        if rank <= 3:
+            strip_color = medal_colors[rank]
+            draw.rectangle([board_x, ry, board_x + 3, ry + ROW_H], fill=strip_color)
+
+        # Rank badge
+        badge_color = medal_colors.get(rank, COLOR_DIM)
+        badge_text = medal_labels.get(rank, f"#{rank}")
+        btw = draw.textlength(badge_text, font=font_rank)
+        draw.text((board_x + 28 - btw / 2, ry + ROW_H // 2 - 10), badge_text,
+                  font=font_rank, fill=badge_color)
+
+        # Avatar circle
+        av_x, av_y = board_x + 76, ry + ROW_H // 2
+        draw.ellipse([av_x - 18, av_y - 18, av_x + 18, av_y + 18], fill=(0, 77, 153))
         initials = row["username"][:2].upper()
-        rows_html += f"""
-        <div class="row {rank_class}">
-            <div class="rank-badge {badge_class}">{medal}</div>
-            <div class="user-info">
-                <div class="avatar">{initials}</div>
-                <span class="username">{row["username"]}</span>
-            </div>
-            <div class="msg-count">{row["msgs"]:,}</div>
-        </div>"""
+        iw = draw.textlength(initials, font=font_small)
+        draw.text((av_x - iw / 2, av_y - 8), initials, font=font_small, fill=COLOR_FOAM)
 
-    html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8"/>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet"/>
-<style>
-  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  :root {{
-    --deep: #020b18; --mid: #041e36; --surface: #062d52;
-    --blue1: #0077cc; --blue2: #00b4d8; --cyan: #90e0ef; --foam: #caf0f8;
-    --gold: #ffd700; --silver: #c0c0c0; --bronze: #cd7f32;
-  }}
-  body {{
-    background: linear-gradient(180deg, #020b18 0%, #031526 40%, #041e36 70%, #062d52 100%);
-    color: var(--foam); font-family: 'Exo 2', sans-serif;
-    width: 760px; padding: 40px 32px 48px;
-  }}
-  .header {{ text-align: center; margin-bottom: 28px; }}
-  .eyebrow {{ font-family: 'Rajdhani', sans-serif; font-size: 11px; letter-spacing: 5px;
-    text-transform: uppercase; color: var(--blue2); margin-bottom: 8px; }}
-  .title {{ font-family: 'Rajdhani', sans-serif; font-size: 48px; font-weight: 700;
-    background: linear-gradient(135deg, var(--foam) 0%, var(--cyan) 50%, var(--blue2) 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
-  .sub {{ font-size: 13px; color: var(--cyan); opacity: .7; margin-top: 8px; letter-spacing: 1px; }}
-  .board {{ background: rgba(4,30,54,0.85); border: 1px solid rgba(0,180,216,0.2);
-    border-radius: 16px; overflow: hidden; }}
-  .board-header {{ display: grid; grid-template-columns: 56px 1fr auto;
-    padding: 14px 24px; border-bottom: 1px solid rgba(0,180,216,0.12);
-    background: rgba(0,119,204,.08); }}
-  .board-header span {{ font-family: 'Rajdhani', sans-serif; font-size: 11px;
-    letter-spacing: 3px; text-transform: uppercase; color: var(--blue2); opacity: .6; }}
-  .board-header span:last-child {{ text-align: right; }}
-  .row {{ display: grid; grid-template-columns: 56px 1fr auto; align-items: center;
-    padding: 0 24px; height: 64px; border-bottom: 1px solid rgba(0,180,216,0.06);
-    position: relative; }}
-  .row:last-child {{ border-bottom: none; }}
-  .row.rank-1::before {{ content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-    background: var(--gold); box-shadow: 0 0 12px var(--gold); }}
-  .row.rank-2::before {{ content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-    background: var(--silver); box-shadow: 0 0 12px var(--silver); }}
-  .row.rank-3::before {{ content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-    background: var(--bronze); box-shadow: 0 0 12px var(--bronze); }}
-  .rank-badge {{ font-family: 'Rajdhani', sans-serif; font-size: 18px; font-weight: 700;
-    text-align: center; color: rgba(144,224,239,.35); }}
-  .rank-badge.top1 {{ color: var(--gold); }} .rank-badge.top2 {{ color: var(--silver); }}
-  .rank-badge.top3 {{ color: var(--bronze); }}
-  .user-info {{ display: flex; align-items: center; gap: 12px; }}
-  .avatar {{ width: 36px; height: 36px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--blue1), var(--blue2));
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 14px;
-    color: var(--foam); border: 1px solid rgba(144,224,239,.2); }}
-  .username {{ font-size: 15px; font-weight: 600; color: var(--foam); }}
-  .row.rank-1 .username {{ color: #fff; }}
-  .msg-count {{ font-family: 'Rajdhani', sans-serif; font-size: 17px; font-weight: 700;
-    color: var(--cyan); text-align: right; }}
-  .footer {{ text-align: center; margin-top: 20px; font-size: 11px; color: var(--cyan);
-    opacity: .3; letter-spacing: 2px; text-transform: uppercase; }}
-</style>
-</head>
-<body>
-  <div class="header">
-    <div class="eyebrow">Weekly Rankings</div>
-    <div class="title">Message Leaderboard</div>
-    <div class="sub">Most active members this week</div>
-  </div>
-  <div class="board">
-    <div class="board-header">
-      <span>Rank</span><span>User</span><span>Messages</span>
-    </div>
-    {rows_html}
-  </div>
-  <div class="footer">Resets every Tuesday · 7:30 AM ET</div>
-</body>
-</html>"""
+        # Username
+        uname_color = (255, 255, 255) if rank == 1 else COLOR_FOAM
+        draw.text((board_x + 104, ry + ROW_H // 2 - 10), row["username"],
+                  font=font_med, fill=uname_color)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page(viewport={"width": 760, "height": 800})
-        await page.set_content(html, wait_until="networkidle")
-        screenshot = await page.screenshot(full_page=True)
-        await browser.close()
-        return screenshot
+        # Message count
+        msg_text = f"{row['msgs']:,}"
+        mtw = draw.textlength(msg_text, font=font_rank)
+        draw.text((board_x + board_w - 24 - mtw, ry + ROW_H // 2 - 10),
+                  msg_text, font=font_rank, fill=COLOR_CYAN)
+
+    # Footer
+    footer = "RESETS EVERY TUESDAY  ·  7:30 AM ET"
+    fw = draw.textlength(footer, font=font_small)
+    draw.text(((W - fw) / 2, board_y + BOARD_H + 16), footer, font=font_small, fill=COLOR_DIM)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
 
 
 class Leaderboard(commands.Cog):
@@ -153,7 +181,6 @@ class Leaderboard(commands.Cog):
     def cog_unload(self):
         self.weekly_reset.cancel()
 
-    # ── Weekly reset loop ──────────────────────────────────────────────────────
     @tasks.loop(minutes=1)
     async def weekly_reset(self):
         now = datetime.now(TIMEZONE)
@@ -166,7 +193,6 @@ class Leaderboard(commands.Cog):
     async def before_reset(self):
         await self.bot.wait_until_ready()
 
-    # ── /leaderboard ───────────────────────────────────────────────────────────
     @app_commands.command(name="leaderboard", description="View the weekly message leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -178,12 +204,11 @@ class Leaderboard(commands.Cog):
             return
 
         try:
-            screenshot = await screenshot_leaderboard(rows)
-            file = discord.File(io.BytesIO(screenshot), filename="leaderboard.png")
+            img_bytes = await asyncio.to_thread(render_leaderboard_image, rows)
+            file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
             await interaction.followup.send(file=file)
         except Exception as e:
-            log.error(f"Screenshot failed: {e}")
-            # Fallback to embed if screenshot fails
+            log.error(f"Image render failed: {e}")
             embed = discord.Embed(
                 title="💬 Weekly Message Leaderboard",
                 description="Resets every **Tuesday at 7:30 AM ET**",
@@ -201,7 +226,6 @@ class Leaderboard(commands.Cog):
 
         await broadcast_leaderboard()
 
-    # ── /rank ──────────────────────────────────────────────────────────────────
     @app_commands.command(name="rank", description="Check your or another user's rank")
     @app_commands.describe(user="User to check (defaults to you)")
     async def rank(self, interaction: discord.Interaction, user: discord.Member = None):
@@ -221,7 +245,6 @@ class Leaderboard(commands.Cog):
         embed.add_field(name="Messages (Week)", value=f"`{row['msgs']:,}`", inline=True)
         await interaction.response.send_message(embed=embed)
 
-    # ── /messages ─────────────────────────────────────────────────────────────
     @app_commands.command(name="messages", description="See your total message count")
     async def messages(self, interaction: discord.Interaction):
         row = await get_user_rank(interaction.user.id, weekly=False)

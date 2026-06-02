@@ -31,7 +31,7 @@ class Bot(commands.Bot):
         from utils.database import init_db
         await init_db()
 
-        cogs = ["cogs.leaderboard", "cogs.squads", "cogs.reports", "cogs.staff", "cogs.events"]
+        cogs = ["cogs.leaderboard", "cogs.squads", "cogs.reports", "cogs.staff", "cogs.events", "cogs.vc"]
         for cog in cogs:
             try:
                 await self.load_extension(cog)

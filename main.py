@@ -47,6 +47,11 @@ class Bot(commands.Bot):
             await self.tree.sync()
         log.info("Commands synced")
 
+        # Start the web + WebSocket server
+        from web.server import start_web
+        asyncio.create_task(start_web())
+        log.info("Web server started")
+
     async def on_ready(self):
         log.info(f"Logged in as {self.user} ({self.user.id})")
         await self.change_presence(activity=discord.Activity(

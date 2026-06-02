@@ -43,13 +43,11 @@ def fetch_avatar(url: str, size: int = 64) -> Image.Image:
         with urllib.request.urlopen(req, timeout=5) as r:
             data = r.read()
         av = Image.open(io.BytesIO(data)).convert("RGBA").resize((size, size))
-        # Circular mask
         mask = Image.new("L", (size, size), 0)
         ImageDraw.Draw(mask).ellipse([0, 0, size, size], fill=255)
         av.putalpha(mask)
         return av
     except Exception:
-        # Fallback: solid circle
         av = Image.new("RGBA", (size, size), (0, 77, 153, 255))
         mask = Image.new("L", (size, size), 0)
         ImageDraw.Draw(mask).ellipse([0, 0, size, size], fill=255)
@@ -58,7 +56,6 @@ def fetch_avatar(url: str, size: int = 64) -> Image.Image:
 
 
 def render_leaderboard_image(rows_data) -> bytes:
-    # rows_data: list of dicts with username, msgs, avatar_url
     COLOR_BG1    = (2, 11, 24)
     COLOR_BG2    = (6, 45, 82)
     COLOR_FOAM   = (202, 240, 248)
@@ -75,9 +72,10 @@ def render_leaderboard_image(rows_data) -> bytes:
     HEADER_H = 52
     PAD = 24
     TOP_H = 140
+    FOOTER_H = 100  # extra space for reward text
     n = min(len(rows_data), 10)
     BOARD_H = HEADER_H + ROW_H * n
-    H = TOP_H + BOARD_H + 60
+    H = TOP_H + BOARD_H + FOOTER_H
 
     img = Image.new("RGB", (W, H))
     draw = ImageDraw.Draw(img)
@@ -99,30 +97,30 @@ def render_leaderboard_image(rows_data) -> bytes:
         font_rank   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
         font_hdr    = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
         font_init   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
+        font_reward = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+        font_reward_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
     except:
-        font_title = font_sub = font_user = font_msgs = font_rank = font_hdr = font_init = ImageFont.load_default()
+        font_title = font_sub = font_user = font_msgs = font_rank = font_hdr = font_init = font_reward = font_reward_sub = ImageFont.load_default()
 
     # Title
-    title = "Message Leaderboard"
-    tw = draw.textlength(title, font=font_title)
-    draw.text(((W - tw) / 2, 24), title, font=font_title, fill=COLOR_FOAM)
-
     eyebrow = "WEEKLY RANKINGS"
     ew = draw.textlength(eyebrow, font=font_sub)
     draw.text(((W - ew) / 2, 10), eyebrow, font=font_sub, fill=COLOR_BLUE2)
+
+    title = "Message Leaderboard"
+    tw = draw.textlength(title, font=font_title)
+    draw.text(((W - tw) / 2, 24), title, font=font_title, fill=COLOR_FOAM)
 
     sub = "Most active members this week"
     sw = draw.textlength(sub, font=font_sub)
     draw.text(((W - sw) / 2, 68), sub, font=font_sub, fill=COLOR_CYAN)
 
-    # Divider
     draw.line([(PAD, 96), (W - PAD, 96)], fill=(0, 180, 216, 60), width=1)
 
     # Board
     bx, by = PAD, TOP_H
     bw = W - PAD * 2
 
-    # Card bg
     draw.rectangle([bx, by, bx + bw, by + BOARD_H], fill=COLOR_CARD)
     draw.rectangle([bx, by, bx + bw, by + BOARD_H], outline=(0, 180, 216), width=1)
 
@@ -141,25 +139,20 @@ def render_leaderboard_image(rows_data) -> bytes:
         rank = i + 1
         ry = by + HEADER_H + i * ROW_H
 
-        # Alternate row bg
         if i % 2 == 0:
             draw.rectangle([bx, ry, bx + bw, ry + ROW_H], fill=(5, 35, 60))
 
-        # Row border
         draw.line([(bx, ry + ROW_H), (bx + bw, ry + ROW_H)], fill=(0, 60, 90), width=1)
 
-        # Left color strip top 3
         if rank <= 3:
             draw.rectangle([bx, ry, bx + 4, ry + ROW_H], fill=medal_colors[rank])
 
-        # Rank badge
         badge_color = medal_colors.get(rank, COLOR_DIM)
         badge_text = medal_labels.get(rank, f"#{rank}")
         btw = draw.textlength(badge_text, font=font_rank)
         draw.text((bx + 14 + (52 - btw) / 2, ry + ROW_H // 2 - 12), badge_text,
                   font=font_rank, fill=badge_color)
 
-        # Avatar
         av_size = 52
         av_x = bx + 72
         av_y = ry + (ROW_H - av_size) // 2
@@ -173,19 +166,27 @@ def render_leaderboard_image(rows_data) -> bytes:
             iw = draw.textlength(initials, font=font_init)
             draw.text((av_x + (av_size - iw) / 2, av_y + 16), initials, font=font_init, fill=COLOR_FOAM)
 
-        # Username
         uname_color = (255, 255, 255) if rank == 1 else COLOR_FOAM
         draw.text((bx + 136, ry + ROW_H // 2 - 12), row["username"], font=font_user, fill=uname_color)
 
-        # Message count
         msg_text = f"{row['msgs']:,}"
         mtw = draw.textlength(msg_text, font=font_msgs)
         draw.text((bx + bw - 16 - mtw, ry + ROW_H // 2 - 12), msg_text, font=font_msgs, fill=COLOR_CYAN)
 
-    # Footer
-    footer = "RESETS EVERY TUESDAY  ·  7:30 AM ET"
-    fw = draw.textlength(footer, font=font_sub)
-    draw.text(((W - fw) / 2, by + BOARD_H + 16), footer, font=font_sub, fill=COLOR_DIM)
+    # Reward box
+    reward_y = by + BOARD_H + 14
+    draw.rectangle([bx, reward_y, bx + bw, reward_y + 72], fill=(3, 22, 42))
+    draw.rectangle([bx, reward_y, bx + bw, reward_y + 72], outline=(255, 215, 0, 80), width=1)
+    draw.rectangle([bx, reward_y, bx + 4, reward_y + 72], fill=COLOR_GOLD)
+
+    trophy = "🏆  Top 3 Winners get a special role!"
+    draw.text((bx + 16, reward_y + 10), trophy, font=font_reward, fill=COLOR_GOLD)
+
+    ping_text = "You'll get pinged in announcements when the Leaderboard resets."
+    draw.text((bx + 16, reward_y + 34), ping_text, font=font_reward_sub, fill=COLOR_FOAM)
+
+    reset_text = "Resets every Tuesday · 7:30 AM ET"
+    draw.text((bx + 16, reward_y + 54), reset_text, font=font_reward_sub, fill=COLOR_DIM)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -194,7 +195,6 @@ def render_leaderboard_image(rows_data) -> bytes:
 
 
 async def build_leaderboard_image(bot, rows) -> bytes:
-    # Fetch avatars concurrently
     async def get_avatar(row):
         try:
             user = await bot.fetch_user(int(row["user_id"]))

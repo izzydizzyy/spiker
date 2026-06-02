@@ -7,7 +7,8 @@ import asyncio
 import json
 import logging
 import io
-from PIL import Image, ImageDraw, ImageFont
+import urllib.request
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from utils.database import get_leaderboard, get_user_rank, reset_weekly
 
@@ -36,141 +37,175 @@ async def broadcast_leaderboard():
     ws_clients -= dead
 
 
-def render_leaderboard_image(rows) -> bytes:
-    # Colors
-    BG_TOP       = (2, 11, 24)
-    BG_BOT       = (6, 45, 82)
-    CARD_BG      = (4, 30, 54, 210)
-    BORDER       = (0, 180, 216, 50)
-    HEADER_BG    = (0, 119, 204, 20)
-    ROW_BORDER   = (0, 180, 216, 15)
+def fetch_avatar(url: str, size: int = 64) -> Image.Image:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = r.read()
+        av = Image.open(io.BytesIO(data)).convert("RGBA").resize((size, size))
+        # Circular mask
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse([0, 0, size, size], fill=255)
+        av.putalpha(mask)
+        return av
+    except Exception:
+        # Fallback: solid circle
+        av = Image.new("RGBA", (size, size), (0, 77, 153, 255))
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse([0, 0, size, size], fill=255)
+        av.putalpha(mask)
+        return av
+
+
+def render_leaderboard_image(rows_data) -> bytes:
+    # rows_data: list of dicts with username, msgs, avatar_url
+    COLOR_BG1    = (2, 11, 24)
+    COLOR_BG2    = (6, 45, 82)
     COLOR_FOAM   = (202, 240, 248)
     COLOR_CYAN   = (144, 224, 239)
     COLOR_BLUE2  = (0, 180, 216)
     COLOR_GOLD   = (255, 215, 0)
     COLOR_SILVER = (192, 192, 192)
     COLOR_BRONZE = (205, 127, 50)
-    COLOR_DIM    = (100, 160, 190)
+    COLOR_DIM    = (80, 130, 160)
+    COLOR_CARD   = (4, 30, 54)
 
-    W = 760
-    ROW_H = 64
-    HEADER_H = 48
-    TOP_PAD = 80
-    BOTTOM_PAD = 48
-    BOARD_PAD = 32
-
-    n = min(len(rows), 10)
+    W = 520
+    ROW_H = 80
+    HEADER_H = 52
+    PAD = 24
+    TOP_H = 140
+    n = min(len(rows_data), 10)
     BOARD_H = HEADER_H + ROW_H * n
-    H = TOP_PAD + 110 + BOARD_H + BOTTOM_PAD
+    H = TOP_H + BOARD_H + 60
 
-    # Background gradient
     img = Image.new("RGB", (W, H))
     draw = ImageDraw.Draw(img)
+
+    # Background gradient
     for y in range(H):
         t = y / H
-        r = int(BG_TOP[0] + (BG_BOT[0] - BG_TOP[0]) * t)
-        g = int(BG_TOP[1] + (BG_BOT[1] - BG_TOP[1]) * t)
-        b = int(BG_TOP[2] + (BG_BOT[2] - BG_TOP[2]) * t)
+        r = int(COLOR_BG1[0] + (COLOR_BG2[0] - COLOR_BG1[0]) * t)
+        g = int(COLOR_BG1[1] + (COLOR_BG2[1] - COLOR_BG1[1]) * t)
+        b = int(COLOR_BG1[2] + (COLOR_BG2[2] - COLOR_BG1[2]) * t)
         draw.line([(0, y), (W, y)], fill=(r, g, b))
 
-    # Fonts — fallback to default if not found
+    # Fonts
     try:
-        font_big   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
-        font_med   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 15)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-        font_rank  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 17)
+        font_title  = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
+        font_sub    = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
+        font_user   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        font_msgs   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+        font_rank   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+        font_hdr    = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+        font_init   = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 16)
     except:
-        font_big = font_med = font_small = font_rank = ImageFont.load_default()
+        font_title = font_sub = font_user = font_msgs = font_rank = font_hdr = font_init = ImageFont.load_default()
 
-    # Header text
-    eyebrow = "WEEKLY RANKINGS"
-    ew = draw.textlength(eyebrow, font=font_small)
-    draw.text(((W - ew) / 2, 28), eyebrow, font=font_small, fill=COLOR_BLUE2)
-
+    # Title
     title = "Message Leaderboard"
-    tw = draw.textlength(title, font=font_big)
-    draw.text(((W - tw) / 2, 48), title, font=font_big, fill=COLOR_FOAM)
+    tw = draw.textlength(title, font=font_title)
+    draw.text(((W - tw) / 2, 24), title, font=font_title, fill=COLOR_FOAM)
+
+    eyebrow = "WEEKLY RANKINGS"
+    ew = draw.textlength(eyebrow, font=font_sub)
+    draw.text(((W - ew) / 2, 10), eyebrow, font=font_sub, fill=COLOR_BLUE2)
 
     sub = "Most active members this week"
-    sw = draw.textlength(sub, font=font_small)
-    draw.text(((W - sw) / 2, 92), sub, font=font_small, fill=COLOR_CYAN)
+    sw = draw.textlength(sub, font=font_sub)
+    draw.text(((W - sw) / 2, 68), sub, font=font_sub, fill=COLOR_CYAN)
 
-    # Board card
-    board_x = BOARD_PAD
-    board_y = TOP_PAD + 110
-    board_w = W - BOARD_PAD * 2
+    # Divider
+    draw.line([(PAD, 96), (W - PAD, 96)], fill=(0, 180, 216, 60), width=1)
 
-    # Card background
-    card = Image.new("RGBA", (board_w, BOARD_H), CARD_BG)
-    img.paste(Image.new("RGB", (board_w, BOARD_H), (4, 30, 54)), (board_x, board_y),
-              Image.new("L", (board_w, BOARD_H), 210))
+    # Board
+    bx, by = PAD, TOP_H
+    bw = W - PAD * 2
 
-    draw = ImageDraw.Draw(img)
+    # Card bg
+    draw.rectangle([bx, by, bx + bw, by + BOARD_H], fill=COLOR_CARD)
+    draw.rectangle([bx, by, bx + bw, by + BOARD_H], outline=(0, 180, 216), width=1)
 
-    # Card border
-    draw.rectangle([board_x, board_y, board_x + board_w, board_y + BOARD_H],
-                   outline=(0, 180, 216, 50), width=1)
+    # Column headers
+    draw.rectangle([bx, by, bx + bw, by + HEADER_H], fill=(0, 20, 45))
+    draw.text((bx + 16, by + 17), "RANK", font=font_hdr, fill=COLOR_DIM)
+    draw.text((bx + 100, by + 17), "USER", font=font_hdr, fill=COLOR_DIM)
+    msgs_hdr = "MESSAGES"
+    mhw = draw.textlength(msgs_hdr, font=font_hdr)
+    draw.text((bx + bw - 16 - mhw, by + 17), msgs_hdr, font=font_hdr, fill=COLOR_DIM)
 
-    # Column header
-    draw.rectangle([board_x, board_y, board_x + board_w, board_y + HEADER_H],
-                   fill=(0, 30, 60))
-    draw.text((board_x + 20, board_y + 16), "RANK", font=font_small, fill=COLOR_DIM)
-    draw.text((board_x + 80, board_y + 16), "USER", font=font_small, fill=COLOR_DIM)
-    msg_label = "MESSAGES"
-    mlw = draw.textlength(msg_label, font=font_small)
-    draw.text((board_x + board_w - 24 - mlw, board_y + 16), msg_label, font=font_small, fill=COLOR_DIM)
-
-    # Rows
     medal_colors = {1: COLOR_GOLD, 2: COLOR_SILVER, 3: COLOR_BRONZE}
     medal_labels = {1: "#1", 2: "#2", 3: "#3"}
 
-    for i, row in enumerate(rows[:10]):
+    for i, row in enumerate(rows_data[:10]):
         rank = i + 1
-        ry = board_y + HEADER_H + i * ROW_H
+        ry = by + HEADER_H + i * ROW_H
 
-        # Row border bottom
-        draw.line([(board_x, ry + ROW_H), (board_x + board_w, ry + ROW_H)],
-                  fill=(0, 180, 216, 15))
+        # Alternate row bg
+        if i % 2 == 0:
+            draw.rectangle([bx, ry, bx + bw, ry + ROW_H], fill=(5, 35, 60))
 
-        # Left color strip for top 3
+        # Row border
+        draw.line([(bx, ry + ROW_H), (bx + bw, ry + ROW_H)], fill=(0, 60, 90), width=1)
+
+        # Left color strip top 3
         if rank <= 3:
-            strip_color = medal_colors[rank]
-            draw.rectangle([board_x, ry, board_x + 3, ry + ROW_H], fill=strip_color)
+            draw.rectangle([bx, ry, bx + 4, ry + ROW_H], fill=medal_colors[rank])
 
         # Rank badge
         badge_color = medal_colors.get(rank, COLOR_DIM)
         badge_text = medal_labels.get(rank, f"#{rank}")
         btw = draw.textlength(badge_text, font=font_rank)
-        draw.text((board_x + 28 - btw / 2, ry + ROW_H // 2 - 10), badge_text,
+        draw.text((bx + 14 + (52 - btw) / 2, ry + ROW_H // 2 - 12), badge_text,
                   font=font_rank, fill=badge_color)
 
-        # Avatar circle
-        av_x, av_y = board_x + 76, ry + ROW_H // 2
-        draw.ellipse([av_x - 18, av_y - 18, av_x + 18, av_y + 18], fill=(0, 77, 153))
-        initials = row["username"][:2].upper()
-        iw = draw.textlength(initials, font=font_small)
-        draw.text((av_x - iw / 2, av_y - 8), initials, font=font_small, fill=COLOR_FOAM)
+        # Avatar
+        av_size = 52
+        av_x = bx + 72
+        av_y = ry + (ROW_H - av_size) // 2
+        av_img = row.get("avatar_img")
+        if av_img:
+            resized = av_img.resize((av_size, av_size))
+            img.paste(resized, (av_x, av_y), resized)
+        else:
+            draw.ellipse([av_x, av_y, av_x + av_size, av_y + av_size], fill=(0, 77, 153))
+            initials = row["username"][:2].upper()
+            iw = draw.textlength(initials, font=font_init)
+            draw.text((av_x + (av_size - iw) / 2, av_y + 16), initials, font=font_init, fill=COLOR_FOAM)
 
         # Username
         uname_color = (255, 255, 255) if rank == 1 else COLOR_FOAM
-        draw.text((board_x + 104, ry + ROW_H // 2 - 10), row["username"],
-                  font=font_med, fill=uname_color)
+        draw.text((bx + 136, ry + ROW_H // 2 - 12), row["username"], font=font_user, fill=uname_color)
 
         # Message count
         msg_text = f"{row['msgs']:,}"
-        mtw = draw.textlength(msg_text, font=font_rank)
-        draw.text((board_x + board_w - 24 - mtw, ry + ROW_H // 2 - 10),
-                  msg_text, font=font_rank, fill=COLOR_CYAN)
+        mtw = draw.textlength(msg_text, font=font_msgs)
+        draw.text((bx + bw - 16 - mtw, ry + ROW_H // 2 - 12), msg_text, font=font_msgs, fill=COLOR_CYAN)
 
     # Footer
     footer = "RESETS EVERY TUESDAY  ·  7:30 AM ET"
-    fw = draw.textlength(footer, font=font_small)
-    draw.text(((W - fw) / 2, board_y + BOARD_H + 16), footer, font=font_small, fill=COLOR_DIM)
+    fw = draw.textlength(footer, font=font_sub)
+    draw.text(((W - fw) / 2, by + BOARD_H + 16), footer, font=font_sub, fill=COLOR_DIM)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf.read()
+
+
+async def build_leaderboard_image(bot, rows) -> bytes:
+    # Fetch avatars concurrently
+    async def get_avatar(row):
+        try:
+            user = await bot.fetch_user(int(row["user_id"]))
+            url = str(user.display_avatar.with_size(64).url)
+            av_img = await asyncio.to_thread(fetch_avatar, url, 64)
+        except Exception:
+            av_img = None
+        return {**row, "avatar_img": av_img}
+
+    rows_with_avatars = await asyncio.gather(*[get_avatar(r) for r in rows])
+    return await asyncio.to_thread(render_leaderboard_image, rows_with_avatars)
 
 
 class Leaderboard(commands.Cog):
@@ -204,7 +239,7 @@ class Leaderboard(commands.Cog):
             return
 
         try:
-            img_bytes = await asyncio.to_thread(render_leaderboard_image, rows)
+            img_bytes = await build_leaderboard_image(self.bot, rows)
             file = discord.File(io.BytesIO(img_bytes), filename="leaderboard.png")
             await interaction.followup.send(file=file)
         except Exception as e:
